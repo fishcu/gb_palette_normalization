@@ -1,8 +1,10 @@
 import sys
 import re
-from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-                               QLabel, QLineEdit, QGridLayout, QCheckBox, QPushButton, QFrame,
-                               QColorDialog)
+from PySide6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QLineEdit, QGridLayout, QCheckBox, QPushButton, QFrame,
+    QColorDialog
+)
 from PySide6.QtCore import Qt, Signal, QEvent
 from PySide6.QtGui import QDoubleValidator, QKeyEvent, QColor, QMouseEvent, QClipboard
 import numpy as np
@@ -22,12 +24,8 @@ class RGBLineEdit(QLineEdit):
         """
         super().__init__(parent)
         self.setValidator(QDoubleValidator())
-        self.field_type = field_type  # Store the field type
-
-        # Install event filter to intercept paste events
+        self.field_type = field_type
         self.installEventFilter(self)
-
-        # Flag to avoid recursive paste handling
         self.handling_paste = False
 
     def eventFilter(self, obj, event):
@@ -69,16 +67,11 @@ class RGBLineEdit(QLineEdit):
             # Clean up nested paste content that might be in the clipboard
             text = self.clean_paste_text(text)
 
-            # Debug output
-            print(
-                f"Smart paste received: '{text}' for field type: {self.field_type}")
-
             if self.field_type == "rgb":
                 # For RGB fields, we need exactly 3 values
                 rgb_values = self.extract_exactly_n_values(text, 3)
 
                 if rgb_values:
-                    print(f"Detected RGB values: {rgb_values}")  # Debug output
                     # Emit signal with the RGB values
                     self.rgbValuesPasted.emit(rgb_values)
                     return  # Don't proceed with normal paste
@@ -87,15 +80,14 @@ class RGBLineEdit(QLineEdit):
                 single_value = self.extract_exactly_n_values(text, 1)
 
                 if single_value:
-                    # Debug output
-                    print(f"Extracted single value: {single_value[0]}")
                     # Insert the sanitized value
                     self.setText(str(single_value[0]))
                     return
 
-            print(
-                "No valid values extracted for this field type, falling back to default paste")
             # Fall back to default paste behavior
+            self.paste()
+        except Exception:
+            # If any error occurs, just do a regular paste
             self.paste()
         finally:
             self.handling_paste = False
@@ -117,38 +109,36 @@ class RGBLineEdit(QLineEdit):
 
     def extract_exactly_n_values(self, text, n):
         """Extract exactly n numeric values from text, or return None if not possible"""
-        print(f"Attempting to extract exactly {n} values from: '{text}'")
-
         # Clean up text before processing
         text = text.strip()
 
-        # First try parentheses pattern for RGB triples
+        # First try common patterns for RGB triples
         if n == 3:
             # Handle common RGB parentheses format like "(90, 99, 92)" directly
             parentheses_pattern = r'^\s*\(\s*(\d+\.?\d*)\s*,\s*(\d+\.?\d*)\s*,\s*(\d+\.?\d*)\s*\)\s*$'
             match = re.search(parentheses_pattern, text)
             if match:
                 try:
-                    values = [float(match.group(1)), float(
-                        match.group(2)), float(match.group(3))]
-                    print(f"Matched parentheses pattern: {values}")
-                    return values
-                except ValueError as e:
-                    print(f"ValueError with parentheses pattern: {e}")
+                    return [float(match.group(1)), float(match.group(2)), float(match.group(3))]
+                except ValueError:
+                    pass
+
+            # Try square brackets pattern for RGB triples like "[90, 99, 92]"
+            brackets_pattern = r'^\s*\[\s*(\d+\.?\d*)\s*,\s*(\d+\.?\d*)\s*,\s*(\d+\.?\d*)\s*\]\s*$'
+            match = re.search(brackets_pattern, text)
+            if match:
+                try:
+                    return [float(match.group(1)), float(match.group(2)), float(match.group(3))]
+                except ValueError:
                     pass
 
             # Try another common pattern with more flexibility for exactly 3 values
-            # Use start/end anchors to ensure we match the whole string
             flexible_pattern = r'^\s*(\d+\.?\d*)\s*[,;/|\s]\s*(\d+\.?\d*)\s*[,;/|\s]\s*(\d+\.?\d*)\s*$'
             match = re.search(flexible_pattern, text)
             if match:
                 try:
-                    values = [float(match.group(1)), float(
-                        match.group(2)), float(match.group(3))]
-                    print(f"Matched flexible pattern: {values}")
-                    return values
-                except ValueError as e:
-                    print(f"ValueError with flexible pattern: {e}")
+                    return [float(match.group(1)), float(match.group(2)), float(match.group(3))]
+                except ValueError:
                     pass
 
         # If we're looking for a single value, check for percentage or a direct number
@@ -157,53 +147,34 @@ class RGBLineEdit(QLineEdit):
             percent_match = re.search(r'^\s*(\d+\.?\d*)%\s*$', text)
             if percent_match:
                 try:
-                    value = float(percent_match.group(1))
-                    print(f"Matched percentage: {value}%")
-                    return [value]
-                except ValueError as e:
-                    print(f"ValueError with percentage: {e}")
+                    return [float(percent_match.group(1))]
+                except ValueError:
                     pass
 
             # Try to match a single number with nothing else
             number_match = re.search(r'^\s*([-+]?\d*\.?\d+)\s*$', text)
             if number_match:
                 try:
-                    value = float(number_match.group(1))
-                    print(f"Matched single number: {value}")
-                    return [value]
-                except ValueError as e:
-                    print(f"ValueError with single number: {e}")
+                    return [float(number_match.group(1))]
+                except ValueError:
                     pass
 
             # If we've come this far, check if there's exactly one number in the text
-            # (for cases like "L* = 35.5" where we only want the 35.5)
             numbers = re.findall(r'[-+]?\d*\.?\d+', text)
             if len(numbers) == 1:
                 try:
-                    value = float(numbers[0])
-                    print(f"Extracted the only number in text: {value}")
-                    return [value]
-                except ValueError as e:
-                    print(f"ValueError extracting only number: {e}")
+                    return [float(numbers[0])]
+                except ValueError:
                     pass
 
         # As a last resort, extract all numbers and check if we have exactly the requested number
         numbers = re.findall(r'[-+]?\d*\.?\d+', text)
-        print(f"Extracted all numbers: {numbers}")
 
         if len(numbers) == n:  # Only process if we have exactly the requested number
-            # This is a fallback case where the entire text wasn't matched by our patterns,
-            # but it still has exactly the right number of numeric values
             try:
-                values = [float(num) for num in numbers]
-                print(f"Using exactly {n} numbers found: {values}")
-                return values
-            except ValueError as e:
-                print(f"ValueError extracting numbers: {e}")
+                return [float(num) for num in numbers]
+            except ValueError:
                 pass
-        else:
-            print(
-                f"Found {len(numbers)} numbers, but needed exactly {n} - not handling")
 
         # If we reach here, we couldn't extract exactly n values
         return None
@@ -215,7 +186,7 @@ class RGBLineEdit(QLineEdit):
 
 
 class ColorWidget(QFrame):
-    # Signal to emit when color widget is clicked
+    """Color swatch widget that can be clicked for color picking or copying"""
     colorClicked = Signal(object)
 
     def __init__(self, editable=False, copyable=False):
@@ -232,6 +203,7 @@ class ColorWidget(QFrame):
             self.setCursor(Qt.PointingHandCursor)
 
     def setRGB(self, r, g, b):
+        """Set the color of the widget with RGB values clamped to valid range"""
         r = max(0, min(255, r))
         g = max(0, min(255, g))
         b = max(0, min(255, b))
@@ -243,12 +215,9 @@ class ColorWidget(QFrame):
         return (self.current_color.red(), self.current_color.green(), self.current_color.blue())
 
     def mousePressEvent(self, event: QMouseEvent):
-        """Handle mouse press events to emit the colorClicked signal if editable or copyable"""
-        if event.button() == Qt.LeftButton:
-            if self.editable:
-                self.colorClicked.emit(self)
-            elif self.copyable:
-                self.colorClicked.emit(self)
+        """Handle mouse press events to emit the colorClicked signal"""
+        if event.button() == Qt.LeftButton and (self.editable or self.copyable):
+            self.colorClicked.emit(self)
         super().mousePressEvent(event)
 
 
@@ -260,16 +229,14 @@ class MainWindow(QMainWindow):
         # Initialize a status bar for feedback messages
         self.statusBar().showMessage("Ready", 1000)
 
-        # Window will be made non-resizable after it's shown at its natural size
-        # This is done in the showEvent method
-
+        # Setup main window layout
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         self.main_layout = QVBoxLayout(self.central_widget)
-        self.main_layout.setSpacing(6)  # Consistent spacing
-        self.main_layout.setContentsMargins(10, 10, 10, 10)  # Standard margins
+        self.main_layout.setSpacing(6)
+        self.main_layout.setContentsMargins(10, 10, 10, 10)
 
-        # Initialize data structures
+        # Initialize data structures with default values
         self.rgb_inputs = []
         self.lab_values = []
         self.target_luminance = []
@@ -277,55 +244,43 @@ class MainWindow(QMainWindow):
         self.interpolation_checkboxes = []
         self.interpolation_value_edits = []
 
-        # Internal data storage with full precision
-        self.internal_luminance_values = [
-            10.0, 35.0, 70.0, 95.0]  # Default values
-        self.internal_interpolation_values = [0.33, 0.67]  # Default values
-        # Default interpolation values
-        self.interpolation_values = [0.33, 0.67]
+        # Internal data storage with full precision for calculations
+        self.internal_luminance_values = [10.0, 35.0, 70.0, 95.0]
+        self.internal_interpolation_values = [0.33, 0.67]
 
-        # Create the color conversion grid
+        # Build the UI components
         self.create_conversion_grid()
-
-        # Create normalization settings
         self.create_normalization_settings()
-
-        # Initialize the UI
         self.initialize_ui()
-
-        # Calculate window height based on contents
         self.calculate_window_height()
-
-        # Connect signals for real-time updates
         self.connect_signals()
 
         # Initialize all calculated values at startup
         self.calculate_colors()
 
     def calculate_window_height(self):
-        # Define heights and count rows
+        """Calculate and set the initial window height based on content"""
+        # Define height components
         header_height = 20
         data_row_height = 32
-        bottom_section_height = 80  # Normalization section + Calculate button
+        settings_height = 80  # Normalization settings section
         spacing = 6
         margins = 20  # Top + bottom margins
 
-        # Calculate total height
+        # Count rows
         num_header_rows = 2
         num_data_rows = 4
 
+        # Calculate total height
         header_total = header_height * num_header_rows
         data_total = data_row_height * num_data_rows
         spacing_total = spacing * (num_header_rows + num_data_rows - 1)
 
         total_height = header_total + data_total + \
-            spacing_total + bottom_section_height + margins
+            spacing_total + settings_height + margins
 
-        # Set window dimensions - height only, width will be auto-calculated
+        # Set window height (width will be auto-calculated when shown)
         self.setFixedHeight(total_height)
-
-        # After window is shown and sized, make it non-resizable by setting fixed size
-        # This will be done in showEvent
 
     def showEvent(self, event):
         # Call the parent class's showEvent first
@@ -626,6 +581,7 @@ class MainWindow(QMainWindow):
         self.main_layout.addLayout(norm_layout)
 
     def initialize_ui(self):
+        """Initialize UI elements with default values and store references to widgets"""
         # Store references to input widgets
         self.rgb_inputs = []
         self.lab_values = []
@@ -636,9 +592,17 @@ class MainWindow(QMainWindow):
         self.interpolation_checkboxes = []
         self.interpolation_value_edits = []
 
-        # Define styles
+        # Define styles for widget states
         readonly_style = "background-color: #383838; color: #cccccc; border: 1px solid #555555;"
         editable_style = ""  # Default style for editable fields
+
+        # Default RGB values for each row
+        default_rgb_values = [
+            [(0, 120, 240)],    # First row: blue-ish
+            [(80, 120, 160)],   # Second row: muted blue
+            [(160, 120, 80)],   # Third row: muted orange
+            [(240, 120, 0)]     # Fourth row: orange-ish
+        ]
 
         for row in range(4):
             rgb_row = []
@@ -652,34 +616,8 @@ class MainWindow(QMainWindow):
                     grid_row, col + 1).widget()
                 if isinstance(widget, QLineEdit):
                     # Set the default RGB values based on the row
-                    if row == 0:  # First row
-                        if col == 0:
-                            widget.setText("0")    # R
-                        elif col == 1:
-                            widget.setText("120")  # G
-                        elif col == 2:
-                            widget.setText("240")  # B
-                    elif row == 1:  # Second row
-                        if col == 0:
-                            widget.setText("80")   # R
-                        elif col == 1:
-                            widget.setText("120")  # G
-                        elif col == 2:
-                            widget.setText("160")  # B
-                    elif row == 2:  # Third row
-                        if col == 0:
-                            widget.setText("160")  # R
-                        elif col == 1:
-                            widget.setText("120")  # G
-                        elif col == 2:
-                            widget.setText("80")   # B
-                    elif row == 3:  # Fourth row
-                        if col == 0:
-                            widget.setText("240")  # R
-                        elif col == 1:
-                            widget.setText("120")  # G
-                        elif col == 2:
-                            widget.setText("0")    # B
+                    rgb_values = default_rgb_values[row][0]
+                    widget.setText(str(rgb_values[col]))
                     rgb_row.append(widget)
 
             # CIELAB values
@@ -707,49 +645,48 @@ class MainWindow(QMainWindow):
                 if isinstance(container, QWidget):
                     layout = container.layout()
                     if layout and layout.count() >= 2:
-                        # First widget in layout is checkbox
+                        # First widget in layout is checkbox, second is value edit
                         checkbox = layout.itemAt(0).widget()
-                        # Second widget in layout is value edit
                         value_edit = layout.itemAt(1).widget()
 
                         if checkbox and value_edit:
                             self.interpolation_checkboxes.append(checkbox)
                             self.interpolation_value_edits.append(value_edit)
 
-                            # Special handling for rows 1 and 2
-                            if row == 1:
+                            # Initialize interpolation for rows 1 and 2
+                            if row == 1:  # Row 2 (index 1)
                                 value_edit.setText("0.33")
                                 self.internal_interpolation_values[0] = 0.33
                                 checkbox.setChecked(True)
-                                # Initial styling: target luminance is read-only
+                                # Make target luminance read-only when interpolation is checked
                                 self.target_luminance[1].setStyleSheet(
                                     readonly_style)
-                                # Calculate initial value (with full precision internally)
+                                # Calculate initial value with full precision
                                 self.internal_luminance_values[1] = 10.0 + \
                                     0.33 * (95.0 - 10.0)
                                 self.target_luminance[1].setText(
                                     f"{self.internal_luminance_values[1]:.2f}")
-                            elif row == 2:
+                            elif row == 2:  # Row 3 (index 2)
                                 value_edit.setText("0.67")
                                 self.internal_interpolation_values[1] = 0.67
                                 checkbox.setChecked(True)
-                                # Initial styling: target luminance is read-only
+                                # Make target luminance read-only when interpolation is checked
                                 self.target_luminance[2].setStyleSheet(
                                     readonly_style)
-                                # Calculate initial value (with full precision internally)
+                                # Calculate initial value with full precision
                                 self.internal_luminance_values[2] = 10.0 + \
                                     0.67 * (95.0 - 10.0)
                                 self.target_luminance[2].setText(
                                     f"{self.internal_luminance_values[2]:.2f}")
 
-            # Output RGB
+            # Output RGB values
             for col in range(3):
                 widget = self.grid_layout.itemAtPosition(
                     grid_row, col + 9).widget()
                 if isinstance(widget, QLineEdit):
                     rgb_out_row.append(widget)
 
-            # Color widgets
+            # Color widgets (input and output swatches)
             input_color_widget = self.grid_layout.itemAtPosition(
                 grid_row, 0).widget()
             if isinstance(input_color_widget, ColorWidget):
@@ -760,6 +697,7 @@ class MainWindow(QMainWindow):
             if isinstance(output_color_widget, ColorWidget):
                 self.color_widgets_output.append(output_color_widget)
 
+            # Store the widget references in arrays for later use
             self.rgb_inputs.append(rgb_row)
             self.lab_values.append(lab_row)
             self.rgb_outputs.append(rgb_out_row)
@@ -932,24 +870,26 @@ class MainWindow(QMainWindow):
             pass
 
     def rgb_to_lab(self, r, g, b, normalize=(255.0, 255.0, 255.0)):
+        """Convert RGB values to CIELAB color space with channel-specific normalization"""
         # Normalize RGB values with separate factors for each channel
         r_norm, g_norm, b_norm = normalize
         r_normalized = r / r_norm
         g_normalized = g / g_norm
         b_normalized = b / b_norm
 
-        # Convert to Lab
+        # Convert to Lab using colormath library
         rgb = sRGBColor(r_normalized, g_normalized, b_normalized)
         lab = convert_color(rgb, LabColor)
 
         return lab.lab_l, lab.lab_a, lab.lab_b
 
     def lab_to_rgb(self, l, a, b, output_ranges=(255, 255, 255)):
-        # Convert from Lab to RGB
+        """Convert CIELAB values to RGB color space with custom output ranges"""
+        # Convert from Lab to RGB using colormath library
         lab = LabColor(l, a, b)
         rgb = convert_color(lab, sRGBColor)
 
-        # Apply output ranges
+        # Apply output range scaling to each channel
         r_range, g_range, b_range = output_ranges
         r = rgb.rgb_r * r_range
         g = rgb.rgb_g * g_range
@@ -1104,9 +1044,6 @@ class MainWindow(QMainWindow):
         """Handle RGB values that were pasted into an input field"""
         try:
             if len(values) == 3:
-                # Debug output
-                print(f"Handling pasted RGB values for row {row}: {values}")
-
                 # Format values based on input range
                 input_r_range = float(self.input_r.text())
                 input_g_range = float(self.input_g.text())
@@ -1148,12 +1085,12 @@ class MainWindow(QMainWindow):
             clipboard = QApplication.clipboard()
             clipboard.setText(formatted_rgb)
 
-            # Optional: provide some visual feedback that copying happened
-            # For example, briefly change the cursor or show a tooltip
+            # Provide visual feedback via status bar
             self.statusBar().showMessage(
                 f"Copied {formatted_rgb} to clipboard", 2000)
         except (IndexError, ValueError) as e:
             print(f"Error copying color to clipboard: {e}")
+            self.statusBar().showMessage("Failed to copy color values", 2000)
 
 
 if __name__ == "__main__":

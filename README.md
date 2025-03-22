@@ -1,4 +1,4 @@
-# Gameboy Palette Normalizer
+# GB Palette Normalizer
 
 A utility for creating color palettes with consistent luminance gradation using the CIELAB perceptual color space.
 
