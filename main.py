@@ -1,25 +1,238 @@
 import sys
+import re
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-                               QLabel, QLineEdit, QGridLayout, QCheckBox, QPushButton, QFrame)
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QDoubleValidator, QKeyEvent
+                               QLabel, QLineEdit, QGridLayout, QCheckBox, QPushButton, QFrame,
+                               QColorDialog)
+from PySide6.QtCore import Qt, Signal, QEvent
+from PySide6.QtGui import QDoubleValidator, QKeyEvent, QColor, QMouseEvent, QClipboard
 import numpy as np
 from colormath.color_objects import LabColor, sRGBColor
 from colormath.color_conversions import convert_color
 
 
+class RGBLineEdit(QLineEdit):
+    """Custom QLineEdit with smart paste capabilities for RGB values"""
+    rgbValuesPasted = Signal(list)  # Signal emitted when RGB values are detected in paste
+    
+    def __init__(self, parent=None, field_type="rgb"):
+        """
+        Initialize with field type to control paste behavior
+        field_type: "rgb" for RGB fields expecting 3 values, "single" for fields expecting 1 value
+        """
+        super().__init__(parent)
+        self.setValidator(QDoubleValidator())
+        self.field_type = field_type  # Store the field type
+        
+        # Install event filter to intercept paste events
+        self.installEventFilter(self)
+        
+        # Flag to avoid recursive paste handling
+        self.handling_paste = False
+        
+    def eventFilter(self, obj, event):
+        """Filter events to catch paste operations"""
+        if obj == self:
+            # Handle key press events for Ctrl+V
+            if event.type() == QEvent.KeyPress:
+                key_event = event
+                if (key_event.key() == Qt.Key_V and 
+                    key_event.modifiers() & Qt.ControlModifier):
+                    self.smart_paste()
+                    return True  # Event handled
+                    
+            # Handle context menu paste actions
+            elif event.type() == QEvent.ContextMenu:
+                # Let the context menu show normally, but we'll connect to its paste action
+                menu = self.createStandardContextMenu()
+                for action in menu.actions():
+                    if action.text().endswith('Paste') or 'paste' in action.text().lower():
+                        action.triggered.connect(self.smart_paste)
+                        break
+                menu.exec_(event.globalPos())
+                return True  # Event handled
+                
+        # For all other events, let them propagate
+        return super().eventFilter(obj, event)
+        
+    def smart_paste(self):
+        """Handle paste operations from clipboard with smart parsing"""
+        if self.handling_paste:
+            return  # Prevent recursion
+            
+        self.handling_paste = True
+        try:
+            # Get text from clipboard
+            clipboard = QApplication.clipboard()
+            text = clipboard.text().strip()
+            
+            # Clean up nested paste content that might be in the clipboard
+            text = self.clean_paste_text(text)
+            
+            print(f"Smart paste received: '{text}' for field type: {self.field_type}")  # Debug output
+            
+            if self.field_type == "rgb":
+                # For RGB fields, we need exactly 3 values
+                rgb_values = self.extract_exactly_n_values(text, 3)
+                
+                if rgb_values:
+                    print(f"Detected RGB values: {rgb_values}")  # Debug output
+                    # Emit signal with the RGB values
+                    self.rgbValuesPasted.emit(rgb_values)
+                    return  # Don't proceed with normal paste
+            else:
+                # For single-value fields, we need exactly 1 value
+                single_value = self.extract_exactly_n_values(text, 1)
+                
+                if single_value:
+                    print(f"Extracted single value: {single_value[0]}")  # Debug output
+                    # Insert the sanitized value
+                    self.setText(str(single_value[0]))
+                    return
+                    
+            print("No valid values extracted for this field type, falling back to default paste")
+            # Fall back to default paste behavior
+            self.paste()
+        finally:
+            self.handling_paste = False
+            
+    def clean_paste_text(self, text):
+        """Clean up nested paste content that might be in the clipboard"""
+        # Remove any debug output or nested paste content
+        if "Smart paste received:" in text:
+            text = re.sub(r"Smart paste received: *'([^']*)'.*", r"\1", text)
+        
+        # Remove any other debug messages that might be in the clipboard
+        text = re.sub(r"Attempting to extract.*\n?", "", text)
+        text = re.sub(r"Extracted all numbers:.*\n?", "", text)
+        text = re.sub(r"Using .*\n?", "", text)
+        text = re.sub(r"Detected RGB values:.*\n?", "", text)
+        text = re.sub(r"Handling pasted RGB values.*\n?", "", text)
+        
+        return text.strip()
+        
+    def extract_exactly_n_values(self, text, n):
+        """Extract exactly n numeric values from text, or return None if not possible"""
+        print(f"Attempting to extract exactly {n} values from: '{text}'")
+        
+        # Clean up text before processing
+        text = text.strip()
+        
+        # First try parentheses pattern for RGB triples
+        if n == 3:
+            # Handle common RGB parentheses format like "(90, 99, 92)" directly
+            parentheses_pattern = r'^\s*\(\s*(\d+\.?\d*)\s*,\s*(\d+\.?\d*)\s*,\s*(\d+\.?\d*)\s*\)\s*$'
+            match = re.search(parentheses_pattern, text)
+            if match:
+                try:
+                    values = [float(match.group(1)), float(match.group(2)), float(match.group(3))]
+                    print(f"Matched parentheses pattern: {values}")
+                    return values
+                except ValueError as e:
+                    print(f"ValueError with parentheses pattern: {e}")
+                    pass
+            
+            # Try another common pattern with more flexibility for exactly 3 values
+            # Use start/end anchors to ensure we match the whole string
+            flexible_pattern = r'^\s*(\d+\.?\d*)\s*[,;/|\s]\s*(\d+\.?\d*)\s*[,;/|\s]\s*(\d+\.?\d*)\s*$'
+            match = re.search(flexible_pattern, text)
+            if match:
+                try:
+                    values = [float(match.group(1)), float(match.group(2)), float(match.group(3))]
+                    print(f"Matched flexible pattern: {values}")
+                    return values
+                except ValueError as e:
+                    print(f"ValueError with flexible pattern: {e}")
+                    pass
+        
+        # If we're looking for a single value, check for percentage or a direct number
+        if n == 1:
+            # Handle percentage values (e.g., "20%")
+            percent_match = re.search(r'^\s*(\d+\.?\d*)%\s*$', text)
+            if percent_match:
+                try:
+                    value = float(percent_match.group(1))
+                    print(f"Matched percentage: {value}%")
+                    return [value]
+                except ValueError as e:
+                    print(f"ValueError with percentage: {e}")
+                    pass
+            
+            # Try to match a single number with nothing else
+            number_match = re.search(r'^\s*([-+]?\d*\.?\d+)\s*$', text)
+            if number_match:
+                try:
+                    value = float(number_match.group(1))
+                    print(f"Matched single number: {value}")
+                    return [value]
+                except ValueError as e:
+                    print(f"ValueError with single number: {e}")
+                    pass
+            
+            # If we've come this far, check if there's exactly one number in the text
+            # (for cases like "L* = 35.5" where we only want the 35.5)
+            numbers = re.findall(r'[-+]?\d*\.?\d+', text)
+            if len(numbers) == 1:
+                try:
+                    value = float(numbers[0])
+                    print(f"Extracted the only number in text: {value}")
+                    return [value]
+                except ValueError as e:
+                    print(f"ValueError extracting only number: {e}")
+                    pass
+        
+        # As a last resort, extract all numbers and check if we have exactly the requested number
+        numbers = re.findall(r'[-+]?\d*\.?\d+', text)
+        print(f"Extracted all numbers: {numbers}")
+        
+        if len(numbers) == n:  # Only process if we have exactly the requested number
+            # This is a fallback case where the entire text wasn't matched by our patterns,
+            # but it still has exactly the right number of numeric values
+            try:
+                values = [float(num) for num in numbers]
+                print(f"Using exactly {n} numbers found: {values}")
+                return values
+            except ValueError as e:
+                print(f"ValueError extracting numbers: {e}")
+                pass
+        else:
+            print(f"Found {len(numbers)} numbers, but needed exactly {n} - not handling")
+        
+        # If we reach here, we couldn't extract exactly n values
+        return None
+    
+    def extract_single_value(self, text):
+        """Extract a single numeric value from text (DEPRECATED - use extract_exactly_n_values instead)"""
+        values = self.extract_exactly_n_values(text, 1)
+        return values[0] if values else None
+
+
 class ColorWidget(QFrame):
-    def __init__(self):
+    colorClicked = Signal(object)  # Signal to emit when color widget is clicked
+    
+    def __init__(self, editable=False):
         super().__init__()
         self.setFrameShape(QFrame.Box)
         self.setFixedSize(40, 40)
         self.setAutoFillBackground(True)
+        self.editable = editable
+        self.current_color = QColor(0, 0, 0)
+        
+        # Make the widget look clickable if it's editable
+        if self.editable:
+            self.setCursor(Qt.PointingHandCursor)
 
     def setRGB(self, r, g, b):
         r = max(0, min(255, r))
         g = max(0, min(255, g))
         b = max(0, min(255, b))
+        self.current_color = QColor(int(r), int(g), int(b))
         self.setStyleSheet(f"background-color: rgb({r}, {g}, {b})")
+    
+    def mousePressEvent(self, event: QMouseEvent):
+        """Handle mouse press events to emit the colorClicked signal if editable"""
+        if self.editable and event.button() == Qt.LeftButton:
+            self.colorClicked.emit(self)
+        super().mousePressEvent(event)
 
 
 class MainWindow(QMainWindow):
@@ -173,17 +386,23 @@ class MainWindow(QMainWindow):
             grid_layout.setRowStretch(grid_row, 0)  # Prevent stretching
             
             # Input color swatch (column 0)
-            input_color = ColorWidget()
+            input_color = ColorWidget(editable=True)  # Make input color widgets editable
             # ColorWidget already has fixed size of 40x40
             grid_layout.addWidget(input_color, grid_row, 0, alignment=Qt.AlignCenter)
+            # Connect color picker
+            input_color.colorClicked.connect(lambda widget, row_idx=row: self.open_color_picker(widget, row_idx))
 
             # Input RGB values (columns 1-3)
             for col in range(3):
-                rgb_input = QLineEdit()
-                rgb_input.setValidator(QDoubleValidator())
+                rgb_input = RGBLineEdit(field_type="rgb")  # Specify field type as "rgb"
                 rgb_input.setAlignment(Qt.AlignCenter)
                 rgb_input.setFixedHeight(ROW_HEIGHT - 8)  # Slightly smaller than row height
                 rgb_input.setFixedWidth(60)  # Reduced width for more compact layout
+                
+                # Connect the RGB values pasted signal
+                rgb_input.rgbValuesPasted.connect(
+                    lambda values, r=row: self.handle_rgb_paste(values, r))
+                
                 grid_layout.addWidget(rgb_input, grid_row, col + 1)
 
             # CIELAB values (columns 4-6)
@@ -213,11 +432,15 @@ class MainWindow(QMainWindow):
                 interp_layout.addWidget(interp_check, alignment=Qt.AlignCenter)
                 
                 # Value
-                interp_value = QLineEdit(f"{self.interpolation_values[row-1]:.2f}")
+                interp_value = RGBLineEdit(field_type="single")  # Specify field type as "single"
                 interp_value.setValidator(QDoubleValidator(0.0, 1.0, 2))
                 interp_value.setFixedWidth(60)
                 interp_value.setFixedHeight((ROW_HEIGHT - 2) // 2)  # Half row height minus spacing
                 interp_value.setAlignment(Qt.AlignCenter)
+                if row == 1:
+                    interp_value.setText("0.33")
+                else:
+                    interp_value.setText("0.67")
                 interp_layout.addWidget(interp_value, alignment=Qt.AlignCenter)
                 
                 grid_layout.addWidget(container, grid_row, 7)
@@ -228,11 +451,20 @@ class MainWindow(QMainWindow):
                 grid_layout.addWidget(spacer, grid_row, 7)
 
             # Target Luminance (column 8)
-            target_lum = QLineEdit("50")
+            target_lum = RGBLineEdit(field_type="single")  # Specify field type as "single"
             target_lum.setValidator(QDoubleValidator())
             target_lum.setAlignment(Qt.AlignCenter)
             target_lum.setFixedHeight(ROW_HEIGHT - 8)  # Slightly smaller than row height
             target_lum.setFixedWidth(60)  # Reduced width for more compact layout
+            # Set default values
+            if row == 0:
+                target_lum.setText("10")
+            elif row == 1:
+                target_lum.setText("35")
+            elif row == 2:
+                target_lum.setText("70")
+            elif row == 3:
+                target_lum.setText("95")
             grid_layout.addWidget(target_lum, grid_row, 8)
 
             # Connect checkbox state change for rows 1 and 2
@@ -259,7 +491,7 @@ class MainWindow(QMainWindow):
                 grid_layout.addWidget(rgb_output, grid_row, col + 9)
 
             # Output color swatch (column 12)
-            output_color = ColorWidget()
+            output_color = ColorWidget(editable=False)  # Output colors are not editable
             # ColorWidget already has fixed size of 40x40
             grid_layout.addWidget(output_color, grid_row, 12, alignment=Qt.AlignCenter)
 
@@ -735,6 +967,94 @@ class MainWindow(QMainWindow):
             self.close()
         else:
             super().keyPressEvent(event)
+
+    def open_color_picker(self, widget, row):
+        """Open a color picker dialog when an input color widget is clicked"""
+        try:
+            # Get current RGB values from the input fields
+            current_r = float(self.rgb_inputs[row][0].text())
+            current_g = float(self.rgb_inputs[row][1].text())
+            current_b = float(self.rgb_inputs[row][2].text())
+            
+            # Get input range for scaling
+            input_r_range = float(self.input_r.text())
+            input_g_range = float(self.input_g.text())
+            input_b_range = float(self.input_b.text())
+            
+            # Convert to 0-255 for the color dialog
+            r_255 = min(255, current_r * 255 / input_r_range)
+            g_255 = min(255, current_g * 255 / input_g_range)
+            b_255 = min(255, current_b * 255 / input_b_range)
+            
+            # Create initial color
+            initial_color = QColor(int(r_255), int(g_255), int(b_255))
+            
+            # Open color dialog
+            color = QColorDialog.getColor(initial=initial_color, parent=self, 
+                                         title=f"Select Color for Row {row+1}")
+            
+            # If a valid color was selected
+            if color.isValid():
+                # Scale back to input range
+                scaled_r = color.red() * input_r_range / 255
+                scaled_g = color.green() * input_g_range / 255
+                scaled_b = color.blue() * input_b_range / 255
+                
+                # Update input fields - format with appropriate decimal places based on range
+                if input_r_range > 10:
+                    self.rgb_inputs[row][0].setText(f"{scaled_r:.1f}")
+                else:
+                    self.rgb_inputs[row][0].setText(f"{scaled_r:.3f}")
+                    
+                if input_g_range > 10:
+                    self.rgb_inputs[row][1].setText(f"{scaled_g:.1f}")
+                else:
+                    self.rgb_inputs[row][1].setText(f"{scaled_g:.3f}")
+                    
+                if input_b_range > 10:
+                    self.rgb_inputs[row][2].setText(f"{scaled_b:.1f}")
+                else:
+                    self.rgb_inputs[row][2].setText(f"{scaled_b:.3f}")
+                
+                # Update color widget
+                widget.setRGB(color.red(), color.green(), color.blue())
+                
+                # Recalculate all colors
+                self.calculate_colors()
+        except (ValueError, IndexError, ZeroDivisionError) as e:
+            print(f"Error in color picker for row {row}: {e}")
+
+    def handle_rgb_paste(self, values, row):
+        """Handle RGB values that were pasted into an input field"""
+        try:
+            if len(values) == 3:
+                print(f"Handling pasted RGB values for row {row}: {values}")  # Debug output
+                
+                # Format values based on input range
+                input_r_range = float(self.input_r.text())
+                input_g_range = float(self.input_g.text())
+                input_b_range = float(self.input_b.text())
+                
+                # Apply format based on range
+                if input_r_range > 10:
+                    self.rgb_inputs[row][0].setText(f"{values[0]:.1f}")
+                else:
+                    self.rgb_inputs[row][0].setText(f"{values[0]:.3f}")
+                    
+                if input_g_range > 10:
+                    self.rgb_inputs[row][1].setText(f"{values[1]:.1f}")
+                else:
+                    self.rgb_inputs[row][1].setText(f"{values[1]:.3f}")
+                    
+                if input_b_range > 10:
+                    self.rgb_inputs[row][2].setText(f"{values[2]:.1f}")
+                else:
+                    self.rgb_inputs[row][2].setText(f"{values[2]:.3f}")
+                
+                # Update colors
+                self.calculate_colors()
+        except (ValueError, IndexError) as e:
+            print(f"Error handling RGB paste: {e}")
 
 
 if __name__ == "__main__":
