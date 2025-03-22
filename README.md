@@ -1,14 +1,14 @@
 # Gameboy Palette Normalizer
 
-A tool for normalizing color palettes with consistent luminance values.
+A utility for creating color palettes with consistent luminance gradation using the CIELAB perceptual color space.
 
-## Features
+## Overview
 
-- Convert between RGB and CIELAB color spaces
-- Adjust luminance while preserving color information
-- Interpolate luminance values between endpoints
-- Customize input normalization and output ranges
-- Preview colors in real-time
+This tool helps you create color palettes where colors have specific luminance values while preserving their chromatic characteristics. It's particularly useful for:
+
+- Creating 4-color palettes for retro game platforms
+- Ensuring consistent perceptual brightness across a color set
+- Converting between RGB and CIELAB color spaces
 
 ## Installation
 
@@ -17,19 +17,38 @@ A tool for normalizing color palettes with consistent luminance values.
    ```
    pip install -r requirements.txt
    ```
+3. Run the application:
+   ```
+   python gbpn.py
+   ```
 
-## Usage
+## How to Use
 
-Run the application:
-```
-python main.py
-```
+### Basic Workflow
 
-1. Enter RGB values in the leftmost columns
-2. Set target luminance values or use interpolation
-3. Adjust input normalization (default: 1/255)
-4. Set output ranges (default: R=31, G=63, B=31)
-5. Click "Calculate" to process the colors
+1. **Set Color Ranges**
+   - Input range: Defines the maximum values for your input RGB colors (default: 255)
+   - Output range: Defines the maximum values for your output RGB values (e.g., 31, 63, 31 for Game Boy)
+
+2. **Define Colors**
+   - Enter RGB values in the leftmost columns
+   - Or click any color swatch to open a color picker
+
+3. **Set Luminance Parameters**
+   - Set your desired luminance values in the Target L* column
+   - For middle rows, use the interpolation checkboxes to automatically calculate values between endpoints
+
+4. **View Results**
+   - The output RGB values are shown on the right
+   - Output colors are formatted according to your output range (integers or decimals)
+
+### Tips and Shortcuts
+
+- **Keyboard Navigation**: Press ESC to close the application
+- **Smart Pasting**: Paste RGB triplets directly into any RGB input field:
+  - Supported formats: `(90, 99, 92)`, `128,255,64`, `0 0 0`
+  - The application will automatically distribute values to R, G, B fields
+- **Interpolation**: Toggle checkboxes to switch between manual L* values and calculated ones
 
 ## Requirements
 
