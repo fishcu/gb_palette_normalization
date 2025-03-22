@@ -2,6 +2,8 @@
 
 A utility for creating color palettes with consistent luminance gradation using the CIELAB perceptual color space.
 
+![GB Palette Normalizer Screenshot](screenshot.png)
+
 ## Overview
 
 This tool helps you create color palettes where colors have specific luminance values while preserving their chromatic characteristics. It's particularly useful for:
