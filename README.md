@@ -41,6 +41,7 @@ This tool helps you create color palettes where colors have specific luminance v
 4. **View Results**
    - The output RGB values are shown on the right
    - Output colors are formatted according to your output range (integers or decimals)
+   - Click on any output color swatch to copy its RGB values to the clipboard
 
 ### Tips and Shortcuts
 
@@ -49,6 +50,7 @@ This tool helps you create color palettes where colors have specific luminance v
   - Supported formats: `(90, 99, 92)`, `128,255,64`, `0 0 0`
   - The application will automatically distribute values to R, G, B fields
 - **Interpolation**: Toggle checkboxes to switch between manual L* values and calculated ones
+- **Copy Output Values**: Click on any output color swatch to copy the RGB values in format `[R, G, B]` to the clipboard
 
 ## Requirements
 
