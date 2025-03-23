@@ -3,13 +3,117 @@ import re
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QGridLayout, QCheckBox, QPushButton, QFrame,
-    QColorDialog
+    QColorDialog, QToolTip
 )
-from PySide6.QtCore import Qt, Signal, QEvent
-from PySide6.QtGui import QDoubleValidator, QKeyEvent, QColor, QMouseEvent, QClipboard
+from PySide6.QtCore import Qt, Signal, QEvent, QSize, QPoint
+from PySide6.QtGui import QDoubleValidator, QKeyEvent, QColor, QMouseEvent, QClipboard, QPainter, QPolygon, QPen
 import numpy as np
 from colormath.color_objects import LabColor, sRGBColor
 from colormath.color_conversions import convert_color
+
+
+class WarningTriangleLabel(QLabel):
+    """Custom label showing a warning triangle icon for out-of-gamut values"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(16, 16)  # Fixed size for the warning icon
+        self.setVisible(False)  # Hidden by default
+        self.setToolTip("Out of gamut")  # Tooltip to explain the warning
+
+    def paintEvent(self, event):
+        """Custom paint event to draw a warning triangle"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Create a yellow triangle
+        triangle = QPolygon()
+        triangle.append(QPoint(8, 2))  # Top
+        triangle.append(QPoint(2, 14))  # Bottom left
+        triangle.append(QPoint(14, 14))  # Bottom right
+
+        # Fill triangle with yellow
+        painter.setBrush(QColor(255, 215, 0))  # Gold/yellow color
+        painter.setPen(QPen(QColor(139, 69, 19), 1))  # Dark border
+        painter.drawPolygon(triangle)
+
+        # Draw exclamation mark
+        painter.setPen(QPen(QColor(139, 69, 19), 1.5))
+        painter.drawLine(8, 6, 8, 10)  # Exclamation line
+        painter.drawEllipse(7, 11, 2, 2)  # Exclamation dot
+
+        # End the painter before calling super
+        painter.end()
+
+        super().paintEvent(event)
+
+
+class RGBOutputLineEdit(QLineEdit):
+    """Custom QLineEdit that can display an out-of-gamut warning triangle"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setReadOnly(True)
+        self.setAlignment(Qt.AlignCenter)
+        # Apply styling to indicate read-only status while keeping text selectable
+        self.setStyleSheet(
+            "background-color: #383838; color: #cccccc; border: 1px solid #555555;")
+        self._out_of_gamut = False
+        self.setToolTip("")
+
+    def setOutOfGamut(self, is_out_of_gamut):
+        """Set whether this value is out of gamut"""
+        if self._out_of_gamut != is_out_of_gamut:
+            self._out_of_gamut = is_out_of_gamut
+            # Update tooltip if out of gamut
+            if is_out_of_gamut:
+                self.setToolTip("Out of gamut")
+            else:
+                self.setToolTip("")
+            self.update()  # Request a repaint
+
+    def isOutOfGamut(self):
+        """Return whether this value is out of gamut"""
+        return self._out_of_gamut
+
+    def paintEvent(self, event):
+        # Call the parent paintEvent first to draw the text field
+        super().paintEvent(event)
+
+        # If this value is out of gamut, draw a warning triangle
+        if self._out_of_gamut:
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.Antialiasing)
+
+            # Draw in the left side of the field
+            triangle_size = 12
+            # Position near the left edge with a small margin
+            x_pos = 2
+            # Center vertically
+            y_pos = (self.height() - triangle_size) // 2
+
+            # Create a yellow triangle
+            triangle = QPolygon()
+            triangle.append(QPoint(x_pos + triangle_size//2, y_pos))  # Top
+            # Bottom left
+            triangle.append(QPoint(x_pos, y_pos + triangle_size))
+            triangle.append(QPoint(x_pos + triangle_size,
+                            y_pos + triangle_size))  # Bottom right
+
+            # Fill triangle with yellow
+            painter.setBrush(QColor(255, 215, 0))  # Gold/yellow color
+            painter.setPen(QPen(QColor(139, 69, 19), 1))  # Dark border
+            painter.drawPolygon(triangle)
+
+            # Draw exclamation mark
+            painter.setPen(QPen(QColor(139, 69, 19), 1.5))
+            exclaim_x = x_pos + triangle_size//2
+            painter.drawLine(exclaim_x, y_pos + 3, exclaim_x,
+                             y_pos + 8)  # Exclamation line
+            painter.drawEllipse(exclaim_x - 1, y_pos + 9,
+                                2, 2)  # Exclamation dot
+
+            painter.end()
 
 
 class RGBLineEdit(QLineEdit):
@@ -224,7 +328,7 @@ class ColorWidget(QFrame):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Gameboy Palette Normalizer")
+        self.setWindowTitle("GB Palette Normalizer")
 
         # Initialize a status bar for feedback messages
         self.statusBar().showMessage("Ready", 1000)
@@ -481,16 +585,14 @@ class MainWindow(QMainWindow):
 
             # Output RGB values (columns 9-11)
             for col in range(3):
-                rgb_output = QLineEdit()
-                rgb_output.setReadOnly(True)
-                rgb_output.setAlignment(Qt.AlignCenter)
+                # Create the output field that will show warning triangles when needed
+                rgb_output = RGBOutputLineEdit()
                 # Slightly smaller than row height
                 rgb_output.setFixedHeight(ROW_HEIGHT - 8)
                 # Reduced width for more compact layout
                 rgb_output.setFixedWidth(60)
-                # Apply styling to indicate read-only status while keeping text selectable
-                rgb_output.setStyleSheet(
-                    "background-color: #383838; color: #cccccc; border: 1px solid #555555;")
+
+                # Add to the grid directly
                 grid_layout.addWidget(rgb_output, grid_row, col + 9)
 
             # Output color swatch (column 12)
@@ -683,7 +785,7 @@ class MainWindow(QMainWindow):
             for col in range(3):
                 widget = self.grid_layout.itemAtPosition(
                     grid_row, col + 9).widget()
-                if isinstance(widget, QLineEdit):
+                if isinstance(widget, RGBOutputLineEdit):
                     rgb_out_row.append(widget)
 
             # Color widgets (input and output swatches)
@@ -944,23 +1046,45 @@ class MainWindow(QMainWindow):
                 new_r, new_g, new_b = self.lab_to_rgb(
                     target_l, a, b_val, (output_r, output_g, output_b))
 
+                # Check for out-of-gamut values
+                is_r_out_of_gamut = new_r < 0 or new_r > output_r
+                is_g_out_of_gamut = new_g < 0 or new_g > output_g
+                is_b_out_of_gamut = new_b < 0 or new_b > output_b
+
+                # Set out-of-gamut status on output fields
+                self.rgb_outputs[row][0].setOutOfGamut(is_r_out_of_gamut)
+                self.rgb_outputs[row][1].setOutOfGamut(is_g_out_of_gamut)
+                self.rgb_outputs[row][2].setOutOfGamut(is_b_out_of_gamut)
+
+                # Clip values to valid range
+                new_r_clipped = max(0, min(output_r, new_r))
+                new_g_clipped = max(0, min(output_g, new_g))
+                new_b_clipped = max(0, min(output_b, new_b))
+
                 # Format output RGB values based on range type
-                # For integer ranges: round to nearest integer
-                # For decimal ranges: round to 3 significant digits
-                if is_r_integer:
-                    r_formatted = f"{round(new_r)}"
+                # For integer ranges (except 1.0): round to nearest integer
+                # For range = 1.0: format with 3 decimal places
+                # For other decimal ranges: round to 3 significant digits
+                if is_r_integer and output_r != 1.0:
+                    r_formatted = f"{round(new_r_clipped)}"
+                elif output_r == 1.0:
+                    r_formatted = f"{new_r_clipped:.3f}"
                 else:
-                    r_formatted = f"{new_r:.3g}"
+                    r_formatted = f"{new_r_clipped:.3g}"
 
-                if is_g_integer:
-                    g_formatted = f"{round(new_g)}"
+                if is_g_integer and output_g != 1.0:
+                    g_formatted = f"{round(new_g_clipped)}"
+                elif output_g == 1.0:
+                    g_formatted = f"{new_g_clipped:.3f}"
                 else:
-                    g_formatted = f"{new_g:.3g}"
+                    g_formatted = f"{new_g_clipped:.3g}"
 
-                if is_b_integer:
-                    b_formatted = f"{round(new_b)}"
+                if is_b_integer and output_b != 1.0:
+                    b_formatted = f"{round(new_b_clipped)}"
+                elif output_b == 1.0:
+                    b_formatted = f"{new_b_clipped:.3f}"
                 else:
-                    b_formatted = f"{new_b:.3g}"
+                    b_formatted = f"{new_b_clipped:.3g}"
 
                 # Update output RGB values
                 self.rgb_outputs[row][0].setText(r_formatted)
@@ -968,9 +1092,10 @@ class MainWindow(QMainWindow):
                 self.rgb_outputs[row][2].setText(b_formatted)
 
                 # Update output color widget (normalized to 0-255 for display)
-                output_r_disp = min(255, new_r * 255 / output_r)
-                output_g_disp = min(255, new_g * 255 / output_g)
-                output_b_disp = min(255, new_b * 255 / output_b)
+                # Use clipped values for display
+                output_r_disp = min(255, new_r_clipped * 255 / output_r)
+                output_g_disp = min(255, new_g_clipped * 255 / output_g)
+                output_b_disp = min(255, new_b_clipped * 255 / output_b)
                 self.color_widgets_output[row].setRGB(
                     output_r_disp, output_g_disp, output_b_disp)
 
@@ -1017,17 +1142,23 @@ class MainWindow(QMainWindow):
                 scaled_b = color.blue() * input_b_range / 255
 
                 # Update input fields - format with appropriate decimal places based on range
-                if input_r_range > 10:
+                if input_r_range == 1.0:
+                    self.rgb_inputs[row][0].setText(f"{scaled_r:.3f}")
+                elif input_r_range > 10:
                     self.rgb_inputs[row][0].setText(f"{scaled_r:.1f}")
                 else:
                     self.rgb_inputs[row][0].setText(f"{scaled_r:.3f}")
 
-                if input_g_range > 10:
+                if input_g_range == 1.0:
+                    self.rgb_inputs[row][1].setText(f"{scaled_g:.3f}")
+                elif input_g_range > 10:
                     self.rgb_inputs[row][1].setText(f"{scaled_g:.1f}")
                 else:
                     self.rgb_inputs[row][1].setText(f"{scaled_g:.3f}")
 
-                if input_b_range > 10:
+                if input_b_range == 1.0:
+                    self.rgb_inputs[row][2].setText(f"{scaled_b:.3f}")
+                elif input_b_range > 10:
                     self.rgb_inputs[row][2].setText(f"{scaled_b:.1f}")
                 else:
                     self.rgb_inputs[row][2].setText(f"{scaled_b:.3f}")
@@ -1050,17 +1181,23 @@ class MainWindow(QMainWindow):
                 input_b_range = float(self.input_b.text())
 
                 # Apply format based on range
-                if input_r_range > 10:
+                if input_r_range == 1.0:
+                    self.rgb_inputs[row][0].setText(f"{values[0]:.3f}")
+                elif input_r_range > 10:
                     self.rgb_inputs[row][0].setText(f"{values[0]:.1f}")
                 else:
                     self.rgb_inputs[row][0].setText(f"{values[0]:.3f}")
 
-                if input_g_range > 10:
+                if input_g_range == 1.0:
+                    self.rgb_inputs[row][1].setText(f"{values[1]:.3f}")
+                elif input_g_range > 10:
                     self.rgb_inputs[row][1].setText(f"{values[1]:.1f}")
                 else:
                     self.rgb_inputs[row][1].setText(f"{values[1]:.3f}")
 
-                if input_b_range > 10:
+                if input_b_range == 1.0:
+                    self.rgb_inputs[row][2].setText(f"{values[2]:.3f}")
+                elif input_b_range > 10:
                     self.rgb_inputs[row][2].setText(f"{values[2]:.1f}")
                 else:
                     self.rgb_inputs[row][2].setText(f"{values[2]:.3f}")
